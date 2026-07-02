@@ -1,0 +1,84 @@
+package cl.duoc.consumidor.services;
+
+import cl.duoc.consumidor.config.RabbitMQConfig;
+import cl.duoc.consumidor.dto.InscripcionMensaje;
+import cl.duoc.consumidor.models.ResumenCompra;
+import cl.duoc.consumidor.repositories.ResumenCompraRepository;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import java.nio.charset.StandardCharsets;
+
+@Service
+public class ConsumidorService {
+
+    @Autowired
+    private ResumenCompraRepository resumenCompraRepository;
+
+    @Autowired
+    private S3Service s3Service;
+
+    /**
+     * Escucha la cola RabbitMQ.
+     * Cada vez que el MS Productor envia un mensaje, este metodo se ejecuta automaticamente.
+     *
+     * Flujo:
+     * 1. Recibe el mensaje (InscripcionMensaje deserializado desde JSON)
+     * 2. Genera el texto del resumen de compra
+     * 3. Sube el resumen a S3
+     * 4. Guarda el registro en la tabla RESUMEN_COMPRA de Oracle
+     */
+    @RabbitListener(queues = RabbitMQConfig.QUEUE)
+    public void procesarInscripcion(InscripcionMensaje mensaje) {
+
+        System.out.println(">>> [Consumidor] Mensaje recibido de la cola para inscripcion #" + mensaje.getInscripcionId());
+
+        // 1. Generar el texto del resumen de compra
+        String resumenTexto = generarResumenTexto(mensaje);
+
+        // 2. Subir a S3
+        String s3Key = s3Service.subirResumen(
+                mensaje.getInscripcionId(),
+                resumenTexto.getBytes(StandardCharsets.UTF_8)
+        );
+        System.out.println(">>> [Consumidor] Resumen subido a S3: " + s3Key);
+
+        // 3. Guardar en la tabla RESUMEN_COMPRA de Oracle
+        ResumenCompra resumen = new ResumenCompra();
+        resumen.setInscripcionId(mensaje.getInscripcionId());
+        resumen.setNombreEstudiante(mensaje.getNombreEstudiante());
+        resumen.setFechaInscripcion(mensaje.getFechaInscripcion());
+        resumen.setResumenTexto(resumenTexto);
+        resumen.setTotalPagar(mensaje.getTotalPagar());
+        resumen.setS3Key(s3Key);
+
+        resumenCompraRepository.save(resumen);
+        System.out.println(">>> [Consumidor] Resumen guardado en BD Oracle para inscripcion #" + mensaje.getInscripcionId());
+    }
+
+    /**
+     * Genera el texto formateado del resumen de compra.
+     */
+    private String generarResumenTexto(InscripcionMensaje mensaje) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("================================================\n");
+        sb.append("       RESUMEN DE COMPRA #").append(mensaje.getInscripcionId()).append("\n");
+        sb.append("================================================\n\n");
+        sb.append("Estudiante     : ").append(mensaje.getNombreEstudiante()).append("\n");
+        sb.append("Fecha          : ").append(mensaje.getFechaInscripcion()).append("\n\n");
+        sb.append("Cursos inscritos:\n");
+        sb.append("------------------------------------------------\n");
+
+        for (InscripcionMensaje.CursoDetalle c : mensaje.getCursos()) {
+            sb.append(String.format("  - %-30s | Instructor: %-20s | Duracion: %2dh | Costo: $%.2f\n",
+                    c.getNombre(), c.getInstructor(), c.getDuracionHoras(), c.getCosto()));
+        }
+
+        sb.append("------------------------------------------------\n");
+        sb.append(String.format("TOTAL A PAGAR  : $%.2f\n", mensaje.getTotalPagar()));
+        sb.append("================================================\n");
+
+        return sb.toString();
+    }
+}
