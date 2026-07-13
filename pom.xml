@@ -31,6 +31,16 @@
             <artifactId>spring-boot-starter-amqp</artifactId>
         </dependency>
 
+        <!-- Seguridad: Spring Security + OAuth2 Resource Server (NUEVO EFT) -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-oauth2-resource-server</artifactId>
+        </dependency>
+
         <!-- JPA -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -44,7 +54,7 @@
             <version>23.4.0.24.05</version>
         </dependency>
 
-        <!-- Oracle PKI - necesario para leer el Wallet (cwallet.sso) -->
+        <!-- Oracle PKI -->
         <dependency>
             <groupId>com.oracle.database.security</groupId>
             <artifactId>oraclepki</artifactId>

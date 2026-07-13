@@ -5,10 +5,14 @@ import cl.duoc.consumidor.dto.InscripcionMensaje;
 import cl.duoc.consumidor.models.ResumenCompra;
 import cl.duoc.consumidor.repositories.ResumenCompraRepository;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 @Service
 public class ConsumidorService {
@@ -19,21 +23,44 @@ public class ConsumidorService {
     @Autowired
     private S3Service s3Service;
 
+    @Autowired
+    private RabbitTemplate rabbitTemplate;
+
     /**
-     * Escucha la cola RabbitMQ.
+     * CONSUMO AUTOMATICO: Escucha la cola RabbitMQ.
      * Cada vez que el MS Productor envia un mensaje, este metodo se ejecuta automaticamente.
-     *
-     * Flujo:
-     * 1. Recibe el mensaje (InscripcionMensaje deserializado desde JSON)
-     * 2. Genera el texto del resumen de compra
-     * 3. Sube el resumen a S3
-     * 4. Guarda el registro en la tabla RESUMEN_COMPRA de Oracle
      */
     @RabbitListener(queues = RabbitMQConfig.QUEUE)
     public void procesarInscripcion(InscripcionMensaje mensaje) {
+        System.out.println(">>> [Consumidor] Mensaje recibido AUTOMATICAMENTE de la cola para inscripcion #" + mensaje.getInscripcionId());
+        procesarYGuardar(mensaje);
+    }
 
-        System.out.println(">>> [Consumidor] Mensaje recibido de la cola para inscripcion #" + mensaje.getInscripcionId());
+    /**
+     * CONSUMO MANUAL: Endpoint /resumenes/procesar llama a este metodo.
+     * Saca todos los mensajes pendientes de la cola y los procesa.
+     */
+    public List<ResumenCompra> consumirManualmente() {
+        List<ResumenCompra> procesados = new ArrayList<>();
 
+        InscripcionMensaje mensaje;
+        while ((mensaje = rabbitTemplate.receiveAndConvert(
+                RabbitMQConfig.QUEUE,
+                new ParameterizedTypeReference<InscripcionMensaje>() {})) != null) {
+
+            System.out.println(">>> [Consumidor] Mensaje consumido MANUALMENTE para inscripcion #" + mensaje.getInscripcionId());
+            ResumenCompra resumen = procesarYGuardar(mensaje);
+            procesados.add(resumen);
+        }
+
+        System.out.println(">>> [Consumidor] Total procesados manualmente: " + procesados.size());
+        return procesados;
+    }
+
+    /**
+     * Logica compartida: genera resumen, sube a S3, guarda en Oracle.
+     */
+    private ResumenCompra procesarYGuardar(InscripcionMensaje mensaje) {
         // 1. Generar el texto del resumen de compra
         String resumenTexto = generarResumenTexto(mensaje);
 
@@ -53,8 +80,10 @@ public class ConsumidorService {
         resumen.setTotalPagar(mensaje.getTotalPagar());
         resumen.setS3Key(s3Key);
 
-        resumenCompraRepository.save(resumen);
+        ResumenCompra guardado = resumenCompraRepository.save(resumen);
         System.out.println(">>> [Consumidor] Resumen guardado en BD Oracle para inscripcion #" + mensaje.getInscripcionId());
+
+        return guardado;
     }
 
     /**

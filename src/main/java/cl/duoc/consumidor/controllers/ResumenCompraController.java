@@ -2,6 +2,7 @@ package cl.duoc.consumidor.controllers;
 
 import cl.duoc.consumidor.models.ResumenCompra;
 import cl.duoc.consumidor.repositories.ResumenCompraRepository;
+import cl.duoc.consumidor.services.ConsumidorService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,6 +17,9 @@ public class ResumenCompraController {
 
     @Autowired
     private ResumenCompraRepository resumenCompraRepository;
+
+    @Autowired
+    private ConsumidorService consumidorService;
 
     /**
      * GET /resumenes
@@ -39,6 +43,22 @@ public class ResumenCompraController {
     }
 
     /**
+     * POST /resumenes/procesar (NUEVO EFT)
+     * Consume manualmente los mensajes pendientes de la cola RabbitMQ
+     * y los guarda en la BD + S3.
+     */
+    @PostMapping("/procesar")
+    public ResponseEntity<List<ResumenCompra>> procesarCola() {
+        List<ResumenCompra> procesados = consumidorService.consumirManualmente();
+
+        if (procesados.isEmpty()) {
+            return ResponseEntity.noContent().build();
+        }
+
+        return ResponseEntity.ok(procesados);
+    }
+
+    /**
      * GET /
      * Info general del microservicio consumidor.
      */
@@ -49,8 +69,9 @@ public class ResumenCompraController {
         info.put("version", "1.0.0");
         info.put("descripcion", "Consume inscripciones desde RabbitMQ, guarda en Oracle y sube a S3");
         info.put("endpoints", Map.of(
-            "GET  /resumenes",      "Listar todos los resumenes de compra",
-            "GET  /resumenes/{id}", "Obtener un resumen por ID"
+            "GET  /resumenes",          "Listar todos los resumenes de compra",
+            "GET  /resumenes/{id}",     "Obtener un resumen por ID",
+            "POST /resumenes/procesar", "Consumir cola manualmente y guardar en BD"
         ));
         return ResponseEntity.ok(info);
     }
